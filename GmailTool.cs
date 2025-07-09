@@ -14,14 +14,18 @@ namespace GmailMCP
         {
             var request = _gmail.Users.Messages.List("me");
             request.MaxResults = 1; // Limit to the latest
+            request.LabelIds = "INBOX"; // Exclude drafts by only searching inbox
             var response = await request.ExecuteAsync();
             var messageId = response.Messages[0].Id;
             var messageRequest = _gmail.Users.Messages.Get("me", messageId);
             var message = await messageRequest.ExecuteAsync();
             var subjectHeader = message.Payload.Headers.FirstOrDefault(h => h.Name == "Subject")?.Value ?? "No Subject";
             var fromHeader = message.Payload.Headers.FirstOrDefault(h => h.Name == "From")?.Value ?? "No Sender";
-            var body = message.Payload.Parts?.FirstOrDefault(p => p.MimeType == "text/plain")?.Body?.Data ?? message.Payload.Body.Data;
-            return $"From: {fromHeader}\nSubject: {subjectHeader}\n\n{DecodeBase64Url(body)}";
+
+            // Recursively find the body
+            string bodyData = GetMessageBody(message.Payload);
+
+            return $"From: {fromHeader}\nSubject: {subjectHeader}\n\n{DecodeBase64Url(bodyData)}";
         }
 
         [McpServerTool, Description("Send an email using Gmail API")]
@@ -63,6 +67,34 @@ namespace GmailMCP
             }
         }
 
+        private string GetMessageBody(Google.Apis.Gmail.v1.Data.MessagePart payload)
+        {
+            if (payload == null) return string.Empty;
+
+            if (payload.MimeType == "text/plain" && payload.Body?.Data != null)
+                return payload.Body.Data;
+
+            if (payload.MimeType == "text/html" && payload.Body?.Data != null)
+                return payload.Body.Data;
+
+            if (payload.Parts != null && payload.Parts.Count > 0)
+            {
+                // Prefer text/plain
+                foreach (var part in payload.Parts)
+                {
+                    var text = GetMessageBody(part);
+                    if (!string.IsNullOrEmpty(text))
+                        return text;
+                }
+            }
+
+            // Fallback: sometimes the body is directly in the payload
+            if (payload.Body?.Data != null)
+                return payload.Body.Data;
+
+            return string.Empty;
+        }
+
         private static string CreateRawEmail(string to, string subject, string body)
         {
             var raw = $"To: {to}\r\nSubject: {subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body}";
@@ -75,6 +107,7 @@ namespace GmailMCP
 
         private static string DecodeBase64Url(string base64Url)
         {
+            if (string.IsNullOrEmpty(base64Url)) return "Content of the email is not text or html format";
             base64Url = base64Url.Replace('-', '+').Replace('_', '/');
             switch (base64Url.Length % 4)
             {

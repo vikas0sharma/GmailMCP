@@ -4,12 +4,16 @@ using Google.Apis.Util.Store;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using ModelContextProtocol.Protocol;
 
 var builder = WebApplication.CreateBuilder(args);
 //Add MCP server services to the DI
-builder.Services.AddMcpServer()
-    .WithHttpTransport()
-    .WithToolsFromAssembly();
+builder.Services.AddMcpServer(o =>
+{
+    o.ServerInfo = new Implementation { Name = "Gmail MCP Server", Version = "1.0.0", Title = "GmailMCP" };
+})
+.WithHttpTransport()
+.WithToolsFromAssembly();
 
 // Gmail Sevices
 
